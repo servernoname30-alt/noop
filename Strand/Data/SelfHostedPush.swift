@@ -172,6 +172,19 @@ struct SelfHostedPushClient: Sendable {
         return (stateId, streams)
     }
 
+    /// A plain JSON document to a sibling path on the same receiver (the weight-loss log, outside the protocol).
+    func postJSON(path: String, body: Data) async throws {
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else { throw SelfHostedPushFailure.notConfigured }
+        components.path = path
+        guard let url = components.url else { throw SelfHostedPushFailure.notConfigured }
+        var post = request("POST")
+        post.url = url
+        post.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        post.httpBody = body
+        let (data, status) = try await send(post)
+        guard (200..<300).contains(status) else { throw SelfHostedPushFailure.http(status, receiverCode(data)) }
+    }
+
     func post(_ batch: PushBatch) async throws {
         var post = request("POST")
         post.setValue("application/x-ndjson; charset=utf-8", forHTTPHeaderField: "Content-Type")
@@ -202,7 +215,7 @@ struct SelfHostedPushEngine: Sendable {
     let deadline: Date
     let maxRequests: Int
 
-    struct Outcome: Sendable { var batches = 0; var rows = 0; var finished = true }
+    struct Outcome: Sendable { var batches = 0; var rows = 0; var finished = true; var newDestination = false }
 
     private func hasBudget(_ outcome: Outcome, adding requests: Int = 1) -> Bool {
         Date() < deadline && outcome.batches + requests <= maxRequests
@@ -212,11 +225,12 @@ struct SelfHostedPushEngine: Sendable {
         let (stateId, streams) = try await client.capabilities()
         var progress = SelfHostedPushProgress.load()
         let namespace = [sourceId, client.endpoint.absoluteString.lowercased(), PushProtocol.version, stateId].joined(separator: "\n")
+        var outcome = Outcome()
         if progress.namespace != namespace {
             progress = SelfHostedPushProgress(namespace: namespace)
             progress.save()
+            outcome.newDestination = true
         }
-        var outcome = Outcome()
         let advertised = Set(streams)
         for stream in PushProtocol.registry where advertised.contains(stream.name) {
             guard try await store.pushSupports(stream) else { continue }
@@ -341,7 +355,11 @@ final class SelfHostedPushCenter: ObservableObject {
     @Published private(set) var lastFailure: String?
     @Published private(set) var lastRows = 0
 
+    /// Set on iOS by the app: the weight-loss log (CutPlanStore) as JSON, sent after a delivery when it changed.
+    var cutSnapshot: (@MainActor () -> Data?)?
+
     private var rerun = false
+    private let cutHashKey = "selfHostedPush.cutHash"
     private let successKey = "selfHostedPush.lastSuccess"
     private let failureKey = "selfHostedPush.lastFailure"
     private let rowsKey = "selfHostedPush.lastRows"
@@ -397,6 +415,9 @@ final class SelfHostedPushCenter: ObservableObject {
                                               deviceId: deviceId, store: store, deadline: Date().addingTimeInterval(seconds), maxRequests: 60)
             do {
                 let outcome = try await Task.detached { try await engine.run() }.value
+                // A new receiver (or a reset one) has never seen the weight-loss log either.
+                if outcome.newDestination { UserDefaults.standard.removeObject(forKey: cutHashKey) }
+                try await sendCutIfChanged(engine.client)
                 record(.success(outcome))
             } catch let failure as SelfHostedPushFailure {
                 record(.failure(failure))
@@ -410,6 +431,18 @@ final class SelfHostedPushCenter: ObservableObject {
         #if os(iOS)
         assertion.end()
         #endif
+    }
+
+    private func sendCutIfChanged(_ client: SelfHostedPushClient) async throws {
+        guard let body = cutSnapshot?() else { return }
+        let hash = PushProtocol.sha256Hex(Data(SelfHostedPushSettings.sourceId.utf8) + body)
+        guard hash != UserDefaults.standard.string(forKey: cutHashKey) else { return }
+        // Wrapped with the installation id, so the receiver keeps one log per phone install.
+        var wrapped = Data("{\"sourceId\":\"\(SelfHostedPushSettings.sourceId)\",\"snapshot\":".utf8)
+        wrapped.append(body)
+        wrapped.append(Data("}".utf8))
+        try await client.postJSON(path: "/api/health/cut", body: wrapped)
+        UserDefaults.standard.set(hash, forKey: cutHashKey)
     }
 
     private func record(_ result: Result<SelfHostedPushEngine.Outcome, SelfHostedPushFailure>) {

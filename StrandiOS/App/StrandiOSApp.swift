@@ -175,6 +175,8 @@ struct StrandiOSApp: App {
         model.healthWriteBack = { [weak bridge] in
             _ = await bridge?.writeBackAfterNewData()
         }
+        // Personal build: zhoop's food log, weigh-ins and plan ride along with the self-hosted push.
+        SelfHostedPushCenter.shared.cutSnapshot = { CutPlanStore.shared.pushSnapshot() }
     }
 
     /// The Shortcut-import alert's presentation binding, hoisted OUT of the `.alert` chain.
