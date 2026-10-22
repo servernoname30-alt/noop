@@ -374,6 +374,8 @@ struct StrandiOSApp: App {
                 // opened, which is a worse regression than the bug being fixed. `analyzeRecent`
                 // serialises itself, so overlapping with the sync this foreground also kicks off is safe.
                 Task { await model.runDeferredRescoreIfOwed() }
+                // Personal build: catch the owner's receiver up on open (rows a background run could not finish).
+                Task { await SelfHostedPushCenter.shared.runAfterNewData(repo: model.repo, deviceId: model.deviceId) }
                 Task {
                     health.refreshAuthIfPreviouslyGranted()
                     HealthWritebackBackgroundScheduler.updateSchedule(

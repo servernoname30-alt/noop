@@ -492,6 +492,8 @@ struct RootTabView: View {
                     // #155: HealthKit-free Apple Health path for sideloaded installs (Siri Shortcut
                     // reads the opt-in Documents/noop_sync.txt drop file).
                     MoreRow("Shortcuts Export", "square.and.arrow.up.fill", .shortcutsExport)
+                    // Personal build: push strap data to the owner's own receiver (docs/PUSH_PROTOCOL.md).
+                    MoreRow("Self-hosted push", "arrow.up.to.line.circle.fill", .selfHostedPush)
                     // The plain 4.0 vs 5.0/MG capability grid — what NOOP reads live off each strap.
                     MoreRow("NOOP Limitations", "list.bullet.rectangle", .noopLimitations)
                 }
@@ -599,7 +601,7 @@ struct RootTabView: View {
 private enum MoreDestination: Hashable {
     case insightsHub, intelligence, coach, insights, explore, compare
     case live, workouts, liftLog, health, labBook, stress, breathe, intervals, rhythm
-    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, noopLimitations
+    case fusedRecord, appleHealth, miBand, dataSources, backupSync, shortcutsExport, selfHostedPush, noopLimitations
     case alarms, automations, testCentre, siriShortcuts, powerSaving, settings
 
     @ViewBuilder var destination: some View {
@@ -626,6 +628,7 @@ private enum MoreDestination: Hashable {
         case .noopLimitations: NoopLimitationsView()
         case .backupSync:      BackupSyncView()
         case .shortcutsExport: ShortcutExportSettingsView()
+        case .selfHostedPush:  SelfHostedPushSettingsView()
         case .alarms:          SmartAlarmView()
         case .automations:     AutomationsView()
         case .testCentre:      TestCentreView()

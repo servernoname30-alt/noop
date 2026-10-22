@@ -1,0 +1,66 @@
+name: Personal iOS build
+
+# The owner's personal build (self-hosted push to their own receiver). Every push to `personal` or a `claude/**`
+# branch runs the push package tests and builds an unsigned .ipa for AltStore/SideStore, attached to the rolling
+# `personal-latest` pre-release. Same build/packaging steps as fork-testing-build.yml's iOS job.
+
+on:
+  push:
+    branches: [personal, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: personal-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  push-tests:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Self-hosted push package tests
+        run: swift test --filter SelfHostedPushTests
+        working-directory: Packages/WhoopStore
+
+  ios:
+    # iOS 26 Liquid Glass (glassEffect) needs the iOS 26 SDK → Xcode 26 → macos-26.
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build NOOPiOS for device (unsigned, Release)
+        run: >-
+          xcodebuild -scheme NOOPiOS -configuration Release -destination 'generic/platform=iOS'
+          -derivedDataPath build/dd
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+          build
+      - name: Package sideload .ipa (strip watch, preserve app/widget capabilities)
+        run: |
+          APP=$(find build/dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -type d | head -1)
+          test -n "$APP" || { echo ".app (iphoneos) not found"; exit 1; }
+          rm -rf "$APP/Watch"
+          test -d "$APP/PlugIns/NOOPWidgets.appex" || { echo "NOOPWidgets.appex missing from iOS build"; exit 1; }
+          Tools/prepare-ios-sideload-app.sh "$APP"
+          rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+          zip -qr NOOP-personal.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NOOP-personal-ipa
+          path: NOOP-personal.ipa
+          retention-days: 14
+      - name: Publish to the rolling personal-latest pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete personal-latest --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+          gh release create personal-latest NOOP-personal.ipa --repo "$GITHUB_REPOSITORY" --prerelease \
+            --target "$GITHUB_SHA" --title "Personal build ($GITHUB_REF_NAME, ${GITHUB_SHA::7})" \
+            --notes "Unsigned .ipa with self-hosted push. Open it on the iPhone with SideStore/AltStore (Share → SideStore)."

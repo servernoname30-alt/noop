@@ -741,6 +741,8 @@ final class AppModel: ObservableObject {
         // not scored yet and only reached Health on some later foreground. This is the first moment they
         // exist. The bridge coalesces a call that lands during an in-flight write-back.
         await healthWriteBack?()
+        // Personal build: the same moment for the owner's receiver (a no-op unless turned on).
+        await SelfHostedPushCenter.shared.runAfterNewData(repo: repo, deviceId: deviceId)
         #endif
     }
 
@@ -781,6 +783,8 @@ final class AppModel: ObservableObject {
         // raced the data it was meant to publish and last night's sleep reached Health an app-open late.
         // Set by StrandiOSApp; nil on macOS and in tests, where there is no bridge.
         await healthWriteBack?()
+        // Personal build: send what this offload banked to the owner's receiver (a no-op unless turned on).
+        await SelfHostedPushCenter.shared.runAfterNewData(repo: repo, deviceId: deviceId)
         #endif
     }
 
