@@ -73,6 +73,13 @@ enum ShortcutHealthImport {
             steps != nil || activeKcal != nil || restingHr != nil || hrvMs != nil
                 || avgHr != nil || asleepMin != nil || vo2max != nil || weightKg != nil
         }
+
+        /// Another line for the same day: its values replace this one's where it has them.
+        mutating func merge(_ other: ParsedDay) {
+            steps = other.steps ?? steps; activeKcal = other.activeKcal ?? activeKcal
+            restingHr = other.restingHr ?? restingHr; hrvMs = other.hrvMs ?? hrvMs; avgHr = other.avgHr ?? avgHr
+            asleepMin = other.asleepMin ?? asleepMin; vo2max = other.vo2max ?? vo2max; weightKg = other.weightKg ?? weightKg
+        }
     }
 
     /// A parsed workout line.
@@ -157,7 +164,10 @@ enum ShortcutHealthImport {
             guard let kind = f.first?.uppercased() else { continue }
             switch kind {
             case "D":
-                if let d = parseDay(f) { out.days.append(d) }
+                // Personal build: several lines for one day merge, a later value filling the gaps, so a shortcut
+                // can send each metric from its own loop (`D,day,steps` then `D,day,,activeKcal`).
+                guard let d = parseDay(f) else { continue }
+                if let i = out.days.firstIndex(where: { $0.day == d.day }) { out.days[i].merge(d) } else { out.days.append(d) }
             case "W":
                 if let w = parseWorkout(f) { out.workouts.append(w) }
             default:
@@ -177,27 +187,43 @@ enum ShortcutHealthImport {
         // D,day,steps,activeKcal,restingHr,hrvMs,avgHr,asleepMin,vo2max,weightKg
         guard let day = field(f, 1), isValidDay(day) else { return nil }
         var d = ParsedDay(day: day)
-        d.steps      = field(f, 2).flatMap { Int($0) }
-        d.activeKcal = field(f, 3).flatMap { Double($0) }
-        d.restingHr  = field(f, 4).flatMap { Int($0) }
-        d.hrvMs      = field(f, 5).flatMap { Double($0) }
-        d.avgHr      = field(f, 6).flatMap { Int($0) }
-        d.asleepMin  = field(f, 7).flatMap { Double($0) }
-        d.vo2max     = field(f, 8).flatMap { Double($0) }
-        d.weightKg   = field(f, 9).flatMap { Double($0) }
+        d.steps      = field(f, 2).flatMap { Int(plainNumber($0)) }
+        d.activeKcal = field(f, 3).flatMap { Double(plainNumber($0)) }
+        d.restingHr  = field(f, 4).flatMap { Int(plainNumber($0)) }
+        d.hrvMs      = field(f, 5).flatMap { Double(plainNumber($0)) }
+        d.avgHr      = field(f, 6).flatMap { Int(plainNumber($0)) }
+        d.asleepMin  = field(f, 7).flatMap { Double(plainNumber($0)) }
+        d.vo2max     = field(f, 8).flatMap { Double(plainNumber($0)) }
+        d.weightKg   = field(f, 9).flatMap { Double(plainNumber($0)) }
         return d.hasAnyMetric ? d : nil
     }
 
     private static func parseWorkout(_ f: [String]) -> ParsedWorkout? {
         // W,startUnix,endUnix,sport,durationS,energyKcal,distanceM
-        guard let startS = field(f, 1), let start = Int(startS),
-              let endS = field(f, 2), let end = Int(endS),
+        guard let startS = field(f, 1), let start = timestamp(startS),
+              let endS = field(f, 2), let end = timestamp(endS),
               let sport = field(f, 3), end >= start else { return nil }
         var w = ParsedWorkout(startTs: start, endTs: end, sport: sport)
-        w.durationS  = field(f, 4).flatMap { Double($0) } ?? Double(end - start)
-        w.energyKcal = field(f, 5).flatMap { Double($0) }
-        w.distanceM  = field(f, 6).flatMap { Double($0) }
+        w.durationS  = field(f, 4).flatMap { Double(plainNumber($0)) } ?? Double(end - start)
+        w.energyKcal = field(f, 5).flatMap { Double(plainNumber($0)) }
+        w.distanceM  = field(f, 6).flatMap { Double(plainNumber($0)) }
         return w
+    }
+
+    /// A number as a non-English iPhone's Shortcuts may print it: digit grouping by spaces (plain, no-break or
+    /// narrow no-break) is dropped. Decimal commas cannot appear, the comma being the field separator.
+    static func plainNumber(_ s: String) -> String {
+        s.filter { $0 != " " && $0 != "\u{00A0}" && $0 != "\u{202F}" }
+    }
+
+    /// Unix seconds, or (personal build) an ISO 8601 date-time as Shortcuts' «Format Date → ISO 8601» prints it,
+    /// e.g. `2026-10-23T08:05:00+02:00`: Shortcuts has no plain way to produce Unix time.
+    static func timestamp(_ s: String) -> Int? {
+        if let seconds = Int(plainNumber(s)) { return seconds }
+        let iso = ISO8601DateFormatter()
+        if let date = iso.date(from: s) { return Int(date.timeIntervalSince1970) }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso.date(from: s).map { Int($0.timeIntervalSince1970) }
     }
 
     /// A strict `yyyy-MM-dd` shape check (the store keys on the day string; a garbage key would
@@ -229,7 +255,10 @@ enum ShortcutHealthImport {
                         deepMin: nil, remMin: nil, lightMin: nil, disturbances: nil,
                         restingHr: d.restingHr, avgHrv: d.hrvMs,
                         recovery: nil, strain: nil, exerciseCount: nil,
-                        spo2Pct: nil, skinTempDevC: nil, respRateBpm: nil)
+                        spo2Pct: nil, skinTempDevC: nil, respRateBpm: nil,
+                        // Personal build: the day's steps and active energy here too, so the self-hosted push
+                        // (which carries dailyMetric, not appleDaily) delivers the watch's movement.
+                        steps: d.steps, activeKcalEst: d.activeKcal)
         }
     }
 

@@ -107,6 +107,30 @@ struct SyncStrapIntent: LiveActivityIntent {
     }
 }
 
+/// Personal build: the Shortcuts half of the Apple Health import on a free-Apple-ID install, which has no HealthKit.
+/// The owner's shortcut reads Health and passes NOOP's import text straight in (`D,…` day lines and `W,…` workout
+/// lines, see `ShortcutHealthImport`), without opening NOOP and without the URL path's confirmation alert.
+struct ImportHealthIntent: AppIntent {
+    static var title: LocalizedStringResource = "Import Apple Health"
+    static var description = IntentDescription("Add the days and workouts a shortcut read from Apple Health to NOOP.")
+    static var openAppWhenRun = false
+
+    @Parameter(title: "Records", description: "D,… and W,… lines, one per day or workout.")
+    var records: String
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        // A cold background launch can run the intent a moment before the app has built its model.
+        for _ in 0..<8 where AppModel.shared == nil { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+        guard let model = AppModel.shared else { return .result(dialog: "NOOP не успел запуститься. Открой NOOP и запусти команду ещё раз.") }
+        switch await model.importHealthFromShortcut(text: records) {
+        case .imported(let days, let workouts): return .result(dialog: "NOOP: дней \(days), тренировок \(workouts).")
+        case .nothingToImport:                  return .result(dialog: "NOOP: в тексте нет ни одной строки D или W.")
+        case .rejected(let reason):             return .result(dialog: "NOOP не принял импорт: \(reason)")
+        }
+    }
+}
+
 /// K9: Ask the Coach a question via Siri. Queues the question and opens the app, which sends it
 /// to the configured provider and surfaces the response. The question is spoken or typed in Siri;
 /// the app handles the actual network call using the user's saved key.

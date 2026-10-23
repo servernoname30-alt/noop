@@ -2654,6 +2654,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Personal build: the «Import Apple Health» Shortcuts action (ImportHealthIntent) hands the same text in
+    /// directly. An App Intent runs only from the owner's own Shortcuts or Siri, never from a link another app or a
+    /// web page can open, so unlike `noop://import-health` it is written without the confirmation alert.
+    func importHealthFromShortcut(text: String) async -> ShortcutHealthImport.Outcome {
+        guard text.utf8.count <= ShortcutHealthImport.maxPayloadBytes else { return .rejected("Import payload is too large.") }
+        let parsed = ShortcutHealthImport.parse(text)
+        guard !parsed.isEmpty else { return .nothingToImport }
+        beginImport(.appleHealth)
+        guard let store = await repo.storeHandle() else {
+            finishImport(.appleHealth, summary: "Couldn't open the local store.", failed: true)
+            return .rejected("Couldn't open the local store.")
+        }
+        let outcome = await ShortcutHealthImport.ingest(prepared: .init(text: text, parsed: parsed), into: store)
+        await finishShortcutHealthImport(outcome)
+        return outcome
+    }
+
     private func finishShortcutHealthImport(_ outcome: ShortcutHealthImport.Outcome) async {
         switch outcome {
         case .imported(let days, let workouts):
@@ -2668,7 +2685,9 @@ final class AppModel: ObservableObject {
             finishImport(.appleHealth, summary: "Imported \(days) days\(w)")
             #if os(iOS)
             // Personal build: the Shortcut's days and workouts go on to the owner's receiver (no-op unless on).
-            await SelfHostedPushCenter.shared.runAfterNewData(repo: repo, deviceId: deviceId)
+            // Not awaited: the import intent answers Shortcuts at once; the push holds its own background time.
+            let repo = repo, deviceId = deviceId
+            Task { await SelfHostedPushCenter.shared.runAfterNewData(repo: repo, deviceId: deviceId) }
             #endif
         case .nothingToImport:
             finishImport(.appleHealth, summary: "Nothing new to import.")
