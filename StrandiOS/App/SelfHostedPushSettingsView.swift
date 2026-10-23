@@ -10,6 +10,7 @@ struct SelfHostedPushSettingsView: View {
     @ObservedObject private var center = SelfHostedPushCenter.shared
     @AppStorage(SelfHostedPushSettings.enabledKey) private var enabled = false
     @AppStorage(SelfHostedPushSettings.endpointKey) private var endpoint = ""
+    @AppStorage(SelfHostedPushSettings.appleHealthKey) private var appleHealth = true
     @State private var tokenDraft = ""
     @State private var hasToken = SelfHostedPushSettings.token != nil
     @State private var checkResult: String?
@@ -48,6 +49,19 @@ struct SelfHostedPushSettingsView: View {
                     Text("Отправлять после каждой синхронизации")
                         .font(StrandFont.subhead)
                         .foregroundStyle(StrandPalette.textPrimary)
+                }
+                .toggleStyle(.switch)
+                .tint(StrandPalette.accent)
+
+                Toggle(isOn: $appleHealth) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apple Health тоже")
+                            .font(StrandFont.subhead)
+                            .foregroundStyle(StrandPalette.textPrimary)
+                        Text("Тренировки, дни и сон с Apple Watch, отдельным устройством")
+                            .font(StrandFont.caption)
+                            .foregroundStyle(StrandPalette.textTertiary)
+                    }
                 }
                 .toggleStyle(.switch)
                 .tint(StrandPalette.accent)

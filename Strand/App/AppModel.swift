@@ -2666,6 +2666,10 @@ final class AppModel: ObservableObject {
             repo.appleHealthLoadedSeq = -1
             let w = workouts > 0 ? " · \(workouts) workouts" : ""
             finishImport(.appleHealth, summary: "Imported \(days) days\(w)")
+            #if os(iOS)
+            // Personal build: the Shortcut's days and workouts go on to the owner's receiver (no-op unless on).
+            await SelfHostedPushCenter.shared.runAfterNewData(repo: repo, deviceId: deviceId)
+            #endif
         case .nothingToImport:
             finishImport(.appleHealth, summary: "Nothing new to import.")
         case .rejected(let reason):

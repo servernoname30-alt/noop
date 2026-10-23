@@ -18,8 +18,13 @@ enum SelfHostedPushSettings {
     private static let service = "com.noop.selfHostedPush"
     private static let account = "bearer-token"
 
+    static let appleHealthKey = "selfHostedPush.appleHealth"
+
     static var enabled: Bool { UserDefaults.standard.bool(forKey: enabledKey) }
     static var endpointText: String { UserDefaults.standard.string(forKey: endpointKey) ?? "" }
+    /// Also send what NOOP imported from Apple Health (Apple Watch workouts, days and nights) as a second device,
+    /// `apple-health`, next to the strap. On unless the owner turns it off.
+    static var appleHealth: Bool { UserDefaults.standard.object(forKey: appleHealthKey) as? Bool ?? true }
 
     /// HTTPS only (the owner's receiver sits behind `tailscale serve`), with no credentials, query or fragment.
     static func endpoint(from text: String) -> URL? {
@@ -409,15 +414,27 @@ final class SelfHostedPushCenter: ObservableObject {
         }
         assertion.store(taskID)
         #endif
+        // The strap first, then Apple Health's rows (stored under their own device id), sharing one budget.
+        let appleId = Repository.appleHealthSource
+        let devices = SelfHostedPushSettings.appleHealth && deviceId != appleId ? [deviceId, appleId] : [deviceId]
         repeat {
             rerun = false
-            let engine = SelfHostedPushEngine(client: SelfHostedPushClient(endpoint: endpoint, token: token), sourceId: SelfHostedPushSettings.sourceId,
-                                              deviceId: deviceId, store: store, deadline: Date().addingTimeInterval(seconds), maxRequests: 60)
+            let client = SelfHostedPushClient(endpoint: endpoint, token: token)
+            let deadline = Date().addingTimeInterval(seconds)
             do {
-                let outcome = try await Task.detached { try await engine.run() }.value
+                var outcome = SelfHostedPushEngine.Outcome()
+                for device in devices {
+                    let engine = SelfHostedPushEngine(client: client, sourceId: SelfHostedPushSettings.sourceId, deviceId: device,
+                                                      store: store, deadline: deadline, maxRequests: 60 - outcome.batches)
+                    let one = try await Task.detached { try await engine.run() }.value
+                    outcome.batches += one.batches
+                    outcome.rows += one.rows
+                    outcome.finished = outcome.finished && one.finished
+                    outcome.newDestination = outcome.newDestination || one.newDestination
+                }
                 // A new receiver (or a reset one) has never seen the weight-loss log either.
                 if outcome.newDestination { UserDefaults.standard.removeObject(forKey: cutHashKey) }
-                try await sendCutIfChanged(engine.client)
+                try await sendCutIfChanged(client)
                 record(.success(outcome))
             } catch let failure as SelfHostedPushFailure {
                 record(.failure(failure))

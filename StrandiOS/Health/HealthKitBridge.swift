@@ -749,6 +749,10 @@ final class HealthKitBridge: ObservableObject {
             // actually covered ITS days (see `observerCoalesceWindow`). Set on the success path only.
             lastSyncDays = days
             lastError = nil
+            // Personal build: Apple Watch workouts and days just landed; send them to the owner's receiver
+            // (a no-op unless turned on). Not awaited, so a slow network never holds the sync's caller.
+            let repo = repo, noopDeviceId = noopDeviceId
+            Task { await SelfHostedPushCenter.shared.runAfterNewData(repo: repo, deviceId: noopDeviceId) }
             return true
         } catch {
             // A failed sync must never let a later wake skip on the strength of it — the rows it would
