@@ -414,9 +414,10 @@ final class SelfHostedPushCenter: ObservableObject {
         }
         assertion.store(taskID)
         #endif
-        // The strap first, then Apple Health's rows (stored under their own device id), sharing one budget.
+        // The strap's raw rows, then the scores NOOP computes from them (its "-noop" sibling: nights, recovery, strain,
+        // detected workouts), then Apple Health's rows, all in one budget.
         let appleId = Repository.appleHealthSource
-        let devices = SelfHostedPushSettings.appleHealth && deviceId != appleId ? [deviceId, appleId] : [deviceId]
+        let devices = [deviceId, deviceId + "-noop"] + (SelfHostedPushSettings.appleHealth && deviceId != appleId ? [appleId] : [])
         repeat {
             rerun = false
             let client = SelfHostedPushClient(endpoint: endpoint, token: token)
