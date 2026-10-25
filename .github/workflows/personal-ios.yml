@@ -25,6 +25,9 @@ jobs:
       - name: Self-hosted push package tests
         run: swift test --filter SelfHostedPushTests
         working-directory: Packages/WhoopStore
+      - name: Localised Apple Health export tests
+        run: swift test --filter AppleHealthLocalisedTests
+        working-directory: Packages/StrandImport
 
   ios:
     # iOS 26 Liquid Glass (glassEffect) needs the iOS 26 SDK → Xcode 26 → macos-26.

@@ -130,6 +130,12 @@ public struct AppleHealthImporter {
                 break
             }
         }
+        // A non-English iPhone names it in its own language (`экспорт.xml`): as the folder path does, accept the one
+        // export-like `.xml` near the root.
+        if target == nil {
+            let files = archive.filter { $0.type == .file }
+            if let path = Self.soleLocalisedExportEntry(files.map(\.path)) { target = files.first { $0.path == path } }
+        }
         guard let entry = target else { throw ImportError.missingEntry("export.xml") }
 
         // Decompress export.xml to a temp file (chunks go straight to disk, so RAM stays bounded),
@@ -232,8 +238,25 @@ public struct AppleHealthImporter {
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else { return nil }
-        let xmls = entries.filter { $0.pathExtension.lowercased() == "xml" }
+        let xmls = entries.filter { Self.isLocalisedExportName($0.lastPathComponent) }
         return xmls.count == 1 ? xmls[0] : nil
+    }
+
+    /// A root `.xml` that may be a localised `export.xml` (`экспорт.xml`). The clinical-records file Apple writes beside it
+    /// (`export_cda.xml`, localised as `экспорт_cda.xml`) is never the one, so it does not make the choice ambiguous.
+    static func isLocalisedExportName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasSuffix(".xml") && !lower.hasSuffix("_cda.xml")
+    }
+
+    /// The zip twin of `findExportXML`'s last resort: the single export-like `.xml` at the archive root or one folder down
+    /// (Apple's `apple_health_export/`, whose name a non-English iPhone may localise too).
+    static func soleLocalisedExportEntry(_ paths: [String]) -> String? {
+        let candidates = paths.filter { path in
+            let parts = path.split(separator: "/")
+            return parts.count <= 2 && isLocalisedExportName(String(parts.last ?? ""))
+        }
+        return candidates.count == 1 ? candidates[0] : nil
     }
 }
 
