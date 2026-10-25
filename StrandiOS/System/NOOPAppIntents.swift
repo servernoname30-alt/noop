@@ -131,6 +131,50 @@ struct ImportHealthIntent: AppIntent {
     }
 }
 
+/// Personal build: the live model for a workout intent, waiting a moment for a cold background launch to build it.
+@MainActor
+private func modelForWorkoutIntent() async -> AppModel? {
+    for _ in 0..<8 where AppModel.shared == nil { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+    return AppModel.shared
+}
+
+/// Personal build: start NOOP's own workout session (the Live card's Start) from Shortcuts, so an automation on «Apple Watch
+/// workout starts» runs one alongside the watch: the strap's live pulse and strain under the chosen sport, exact start and end.
+struct StartWorkoutIntent: AppIntent {
+    static var title: LocalizedStringResource = "Start Workout"
+    static var description = IntentDescription("Start a workout in NOOP (live pulse and strain from the strap).")
+    static var openAppWhenRun = false
+
+    @Parameter(title: "Sport", description: "A NOOP sport name: Strength, Running, Walking, Cycling, Elliptical, HIIT…", default: "Strength")
+    var sport: String
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let model = await modelForWorkoutIntent() else { return .result(dialog: "NOOP не успел запуститься. Открой NOOP и запусти команду ещё раз.") }
+        if let active = model.activeWorkout { return .result(dialog: "В NOOP уже идёт тренировка: \(active.sport).") }
+        // The catalogue's own spelling when the name is one of its sports («strength» → «Strength»), else the text as given.
+        let name = WorkoutCatalog.sport(named: sport)?.name ?? sport
+        model.startWorkout(sport: name)
+        return .result(dialog: "NOOP: тренировка «\(model.activeWorkout?.sport ?? name)» началась.")
+    }
+}
+
+/// Personal build: end NOOP's running workout session from Shortcuts (the automation on «Apple Watch workout ends»).
+struct EndWorkoutIntent: AppIntent {
+    static var title: LocalizedStringResource = "End Workout"
+    static var description = IntentDescription("End the workout running in NOOP and save it.")
+    static var openAppWhenRun = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let model = await modelForWorkoutIntent() else { return .result(dialog: "NOOP не успел запуститься. Открой NOOP и закончи тренировку там.") }
+        guard let active = model.activeWorkout else { return .result(dialog: "В NOOP нет начатой тренировки.") }
+        let minutes = Int(Date().timeIntervalSince(active.start) / 60)
+        model.endWorkout()
+        return .result(dialog: "NOOP: тренировка «\(active.sport)» закончена, \(minutes) мин.")
+    }
+}
+
 /// K9: Ask the Coach a question via Siri. Queues the question and opens the app, which sends it
 /// to the configured provider and surfaces the response. The question is spoken or typed in Siri;
 /// the app handles the actual network call using the user's saved key.
